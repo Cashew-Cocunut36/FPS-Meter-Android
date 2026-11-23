@@ -8,7 +8,7 @@ import org.json.JSONArray
 /**
  * Lightweight, in-memory FPS session recording manager.
  *
- * - Collects second-by-second FPS, temperature, and power samples in memory.
+ * - Collects second-by-second FPS, temperature, power and CPU/GPU load samples in memory.
  * - Periodic checkpointing every 60 seconds to guard against unexpected app termination.
  * - Computes variance, smoothness, 5% low FPS, peak, average, and temperature statistics.
  * - Auto-finalizes and persists session on app exit, game change, or service stop.
@@ -41,11 +41,23 @@ object FpsRecordingManager {
     private val currentPowerSamples = mutableListOf<Float>()
     private val currentCpuTempSamples = mutableListOf<Float>()
     private val currentGpuTempSamples = mutableListOf<Float>()
+    private val currentCpuLoadSamples = mutableListOf<Int>()
+    private val currentGpuLoadSamples = mutableListOf<Int>()
 
     private fun isSystemTransientPackage(pkg: String): Boolean {
         return pkg == "com.android.systemui" ||
                 pkg == "android" ||
                 pkg.contains("inputmethod", ignoreCase = true)
+    }
+
+    private fun clearSamples() {
+        currentFpsSamples.clear()
+        currentTempSamples.clear()
+        currentPowerSamples.clear()
+        currentCpuTempSamples.clear()
+        currentGpuTempSamples.clear()
+        currentCpuLoadSamples.clear()
+        currentGpuLoadSamples.clear()
     }
 
     @Synchronized
@@ -57,7 +69,9 @@ object FpsRecordingManager {
         temperature: Float = 0f,
         powerWatts: Float = 0f,
         cpuTemp: Float = 0f,
-        gpuTemp: Float = 0f
+        gpuTemp: Float = 0f,
+        cpuLoad: Int = 0,
+        gpuLoad: Int = 0
     ) {
         val now = System.currentTimeMillis()
         val settings = OverlaySettings.load(context)
@@ -99,6 +113,9 @@ object FpsRecordingManager {
                     if (gpuTemp > 0f) {
                         currentGpuTempSamples.add(gpuTemp)
                     }
+                    // Load is always added (0 is a real reading) so it lines up with the FPS list
+                    currentCpuLoadSamples.add(cpuLoad)
+                    currentGpuLoadSamples.add(gpuLoad)
                 }
 
                 // Periodic checkpoint save
@@ -136,17 +153,15 @@ object FpsRecordingManager {
             highestFps = if (fps > 0) fps else 0
             lowestFps = if (fps > 0) fps else Int.MAX_VALUE
 
-            currentFpsSamples.clear()
-            currentTempSamples.clear()
-            currentPowerSamples.clear()
-            currentCpuTempSamples.clear()
-            currentGpuTempSamples.clear()
+            clearSamples()
             if (fps > 0) {
                 currentFpsSamples.add(fps)
                 if (temperature > 0f) currentTempSamples.add(temperature)
                 if (powerWatts != 0f) currentPowerSamples.add(powerWatts)
                 if (cpuTemp > 0f) currentCpuTempSamples.add(cpuTemp)
                 if (gpuTemp > 0f) currentGpuTempSamples.add(gpuTemp)
+                currentCpuLoadSamples.add(cpuLoad)
+                currentGpuLoadSamples.add(gpuLoad)
             }
         }
     }
@@ -191,9 +206,7 @@ object FpsRecordingManager {
         fpsSum = 0L
         highestFps = 0
         lowestFps = Int.MAX_VALUE
-        currentFpsSamples.clear()
-        currentTempSamples.clear()
-        currentPowerSamples.clear()
+        clearSamples()
         return true
     }
 
@@ -227,6 +240,8 @@ object FpsRecordingManager {
         val powerList = currentPowerSamples.toList()
         val cpuList = currentCpuTempSamples.toList()
         val gpuList = currentGpuTempSamples.toList()
+        val cpuLoadList = currentCpuLoadSamples.toList()
+        val gpuLoadList = currentGpuLoadSamples.toList()
 
         // Reset in-memory state
         activePackage = null
@@ -238,11 +253,7 @@ object FpsRecordingManager {
         lowestFps = Int.MAX_VALUE
         activeSessionId = null
         lastPeriodicSaveTime = 0L
-        currentFpsSamples.clear()
-        currentTempSamples.clear()
-        currentPowerSamples.clear()
-        currentCpuTempSamples.clear()
-        currentGpuTempSamples.clear()
+        clearSamples()
 
         // Discard trivial sessions with zero samples or under minimum duration
         if (count == 0L || durationSec < MIN_SESSION_DURATION_SEC) {
@@ -265,7 +276,9 @@ object FpsRecordingManager {
             tempList = tempList,
             powerList = powerList,
             cpuList = cpuList,
-            gpuList = gpuList
+            gpuList = gpuList,
+            cpuLoadList = cpuLoadList,
+            gpuLoadList = gpuLoadList
         )
 
         saveOrUpdateSession(context, record)
@@ -298,7 +311,9 @@ object FpsRecordingManager {
             tempList = currentTempSamples.toList(),
             powerList = currentPowerSamples.toList(),
             cpuList = currentCpuTempSamples.toList(),
-            gpuList = currentGpuTempSamples.toList()
+            gpuList = currentGpuTempSamples.toList(),
+            cpuLoadList = currentCpuLoadSamples.toList(),
+            gpuLoadList = currentGpuLoadSamples.toList()
         )
 
         saveOrUpdateSession(context, record)
@@ -319,7 +334,9 @@ object FpsRecordingManager {
         tempList: List<Float>,
         powerList: List<Float>,
         cpuList: List<Float> = emptyList(),
-        gpuList: List<Float> = emptyList()
+        gpuList: List<Float> = emptyList(),
+        cpuLoadList: List<Int> = emptyList(),
+        gpuLoadList: List<Int> = emptyList()
     ): FpsSessionRecord {
         val avgFps = if (count > 0L) (sum / count).toInt() else 0
 
@@ -357,6 +374,11 @@ object FpsRecordingManager {
             String.format(java.util.Locale.US, "%.1f", gpuList.maxOrNull() ?: 0f).toFloatOrNull() ?: 0f
         } else 0f
 
+        val avgCpuLoad = cpuLoadList.filter { it >= 0 }.let { if (it.isNotEmpty()) it.average().toInt() else 0 }
+        val maxCpuLoad = (cpuLoadList.maxOrNull() ?: 0).coerceAtLeast(0)
+        val avgGpuLoad = gpuLoadList.filter { it >= 0 }.let { if (it.isNotEmpty()) it.average().toInt() else 0 }
+        val maxGpuLoad = (gpuLoadList.maxOrNull() ?: 0).coerceAtLeast(0)
+
         return FpsSessionRecord(
             id = id,
             packageName = pkg,
@@ -377,7 +399,13 @@ object FpsRecordingManager {
             fpsSamples = fpsList,
             tempSamples = tempList,
             cpuTempSamples = cpuList,
-            gpuTempSamples = gpuList
+            gpuTempSamples = gpuList,
+            avgCpuLoad = avgCpuLoad,
+            maxCpuLoad = maxCpuLoad,
+            avgGpuLoad = avgGpuLoad,
+            maxGpuLoad = maxGpuLoad,
+            cpuLoadSamples = cpuLoadList,
+            gpuLoadSamples = gpuLoadList
         )
     }
 

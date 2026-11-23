@@ -72,6 +72,8 @@ fun GameAnalyticsScreen(
     var showFilterMenu by remember { mutableStateOf(false) }
     var sessionToDelete by remember { mutableStateOf<FpsSessionRecord?>(null) }
     var sessionToShare by remember { mutableStateOf<FpsSessionRecord?>(null) }
+    var chartZoom by remember { mutableStateOf(ChartZoom()) }
+    LaunchedEffect(selectedSessionId) { chartZoom = ChartZoom() }
 
     val activeSession = remember(selectedSessionId, game.sessions) {
         if (selectedSessionId == null) null else game.sessions.firstOrNull { it.id == selectedSessionId }
@@ -114,7 +116,9 @@ fun GameAnalyticsScreen(
                 fpsSamples = samples,
                 tempSamples = tempSamples,
                 cpuTempSamples = cpuSamples,
-                gpuTempSamples = gpuSamples
+                gpuTempSamples = gpuSamples,
+                cpuLoadSamples = activeSession.cpuLoadSamples,
+                gpuLoadSamples = activeSession.gpuLoadSamples
             )
         } else {
             // Aggregate all sessions for this game
@@ -122,6 +126,8 @@ fun GameAnalyticsScreen(
             val allTempSamples = mutableListOf<Float>()
             val allCpuSamples = mutableListOf<Float>()
             val allGpuSamples = mutableListOf<Float>()
+            val allCpuLoadSamples = mutableListOf<Int>()
+            val allGpuLoadSamples = mutableListOf<Int>()
             var totalPowerSum = 0f
             var powerCount = 0
 
@@ -133,6 +139,11 @@ fun GameAnalyticsScreen(
                 allTempSamples.addAll(s.tempSamples)
                 allCpuSamples.addAll(s.cpuTempSamples)
                 allGpuSamples.addAll(s.gpuTempSamples)
+                val hasLoad = s.fpsSamples.isNotEmpty() &&
+                        s.cpuLoadSamples.size == s.fpsSamples.size &&
+                        s.gpuLoadSamples.size == s.fpsSamples.size
+                allCpuLoadSamples.addAll(if (hasLoad) s.cpuLoadSamples else List(samples.size) { -1 })
+                allGpuLoadSamples.addAll(if (hasLoad) s.gpuLoadSamples else List(samples.size) { -1 })
                 if (s.avgPowerWatts > 0f) {
                     totalPowerSum += s.avgPowerWatts
                     powerCount++
@@ -466,17 +477,22 @@ fun GameAnalyticsScreen(
 
             // Card 2: FPS & Temperature Timeline Chart
             item {
-                FpsTemperatureChartCard(
+                FpsTemperatureZoomCard(zoom = chartZoom, onZoomChange = { chartZoom = it },
                     stats = analyticsStats
                 )
             }
 
             // Card 3: Frame Time (ms) Chart
             item {
-                FrameTimeChartCard(
+                FrameTimeZoomCard(zoom = chartZoom, onZoomChange = { chartZoom = it },
                     stats = analyticsStats
                 )
             }
+
+            // Card 3b: CPU, GPU and combined load cards
+            item { CpuLoadCard(stats = analyticsStats, zoom = chartZoom, onZoomChange = { chartZoom = it }) }
+            item { GpuLoadCard(stats = analyticsStats, zoom = chartZoom, onZoomChange = { chartZoom = it }) }
+            item { CombinedPerformanceCard(stats = analyticsStats, zoom = chartZoom, onZoomChange = { chartZoom = it }) }
 
             // Card 4: Recorded Sessions breakdown list
             if (game.sessions.isNotEmpty()) {
@@ -526,7 +542,9 @@ data class AnalyticsData(
     val fpsSamples: List<Int>,
     val tempSamples: List<Float>,
     val cpuTempSamples: List<Float> = emptyList(),
-    val gpuTempSamples: List<Float> = emptyList()
+    val gpuTempSamples: List<Float> = emptyList(),
+    val cpuLoadSamples: List<Int> = emptyList(),
+    val gpuLoadSamples: List<Int> = emptyList()
 )
 
 @Composable
@@ -766,7 +784,7 @@ private fun MetricTile(
 }
 
 @Composable
-private fun FpsTemperatureChartCard(stats: AnalyticsData) {
+private fun FpsTemperatureChartCardOld(stats: AnalyticsData) {
     var touchX by remember { mutableStateOf<Float?>(null) }
     val samples = stats.fpsSamples
     val tempSamples = stats.tempSamples
@@ -1060,7 +1078,7 @@ private fun FpsTemperatureChartCard(stats: AnalyticsData) {
 }
 
 @Composable
-private fun FrameTimeChartCard(stats: AnalyticsData) {
+private fun FrameTimeChartCardOld(stats: AnalyticsData) {
     val samples = stats.fpsSamples
     val frameTimes = remember(samples) {
         samples.map { if (it > 0) 1000f / it else 0f }

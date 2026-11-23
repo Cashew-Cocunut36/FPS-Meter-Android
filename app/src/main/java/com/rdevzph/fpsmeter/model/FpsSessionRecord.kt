@@ -29,7 +29,14 @@ data class FpsSessionRecord(
     val fpsSamples: List<Int> = emptyList(),
     val tempSamples: List<Float> = emptyList(),
     val cpuTempSamples: List<Float> = emptyList(),
-    val gpuTempSamples: List<Float> = emptyList()
+    val gpuTempSamples: List<Float> = emptyList(),
+    // --- New: CPU / GPU load (percent) ---
+    val avgCpuLoad: Int = 0,
+    val maxCpuLoad: Int = 0,
+    val avgGpuLoad: Int = 0,
+    val maxGpuLoad: Int = 0,
+    val cpuLoadSamples: List<Int> = emptyList(),
+    val gpuLoadSamples: List<Int> = emptyList()
 ) {
     fun toJson(): JSONObject {
         return JSONObject().apply {
@@ -49,6 +56,10 @@ data class FpsSessionRecord(
             put("avgPowerWatts", avgPowerWatts.toDouble())
             if (maxCpuTemperature > 0f) put("maxCpuTemperature", maxCpuTemperature.toDouble())
             if (maxGpuTemperature > 0f) put("maxGpuTemperature", maxGpuTemperature.toDouble())
+            if (avgCpuLoad > 0) put("avgCpuLoad", avgCpuLoad)
+            if (maxCpuLoad > 0) put("maxCpuLoad", maxCpuLoad)
+            if (avgGpuLoad > 0) put("avgGpuLoad", avgGpuLoad)
+            if (maxGpuLoad > 0) put("maxGpuLoad", maxGpuLoad)
             if (fpsSamples.isNotEmpty()) {
                 val arr = JSONArray()
                 fpsSamples.forEach { arr.put(it) }
@@ -68,6 +79,16 @@ data class FpsSessionRecord(
                 val arr = JSONArray()
                 gpuTempSamples.forEach { arr.put(it.toDouble()) }
                 put("gpuTempSamples", arr)
+            }
+            if (cpuLoadSamples.isNotEmpty()) {
+                val arr = JSONArray()
+                cpuLoadSamples.forEach { arr.put(it) }
+                put("cpuLoadSamples", arr)
+            }
+            if (gpuLoadSamples.isNotEmpty()) {
+                val arr = JSONArray()
+                gpuLoadSamples.forEach { arr.put(it) }
+                put("gpuLoadSamples", arr)
             }
         }
     }
@@ -99,6 +120,18 @@ data class FpsSessionRecord(
                         gpuList.add(arr.optDouble(i).toFloat())
                     }
                 }
+                val cpuLoadList = mutableListOf<Int>()
+                json.optJSONArray("cpuLoadSamples")?.let { arr ->
+                    for (i in 0 until arr.length()) {
+                        cpuLoadList.add(arr.optInt(i))
+                    }
+                }
+                val gpuLoadList = mutableListOf<Int>()
+                json.optJSONArray("gpuLoadSamples")?.let { arr ->
+                    for (i in 0 until arr.length()) {
+                        gpuLoadList.add(arr.optInt(i))
+                    }
+                }
 
                 val minFps = json.getInt("minFps")
                 val fallbackLow5 = json.optDouble("low5PercentFps", minFps.toDouble()).toFloat()
@@ -123,7 +156,13 @@ data class FpsSessionRecord(
                     fpsSamples = fpsList,
                     tempSamples = tempList,
                     cpuTempSamples = cpuList,
-                    gpuTempSamples = gpuList
+                    gpuTempSamples = gpuList,
+                    avgCpuLoad = json.optInt("avgCpuLoad", 0),
+                    maxCpuLoad = json.optInt("maxCpuLoad", 0),
+                    avgGpuLoad = json.optInt("avgGpuLoad", 0),
+                    maxGpuLoad = json.optInt("maxGpuLoad", 0),
+                    cpuLoadSamples = cpuLoadList,
+                    gpuLoadSamples = gpuLoadList
                 )
             } catch (e: Exception) {
                 null

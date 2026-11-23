@@ -205,6 +205,11 @@ class FpsOverlayService : Service() {
     private var gpuTemp: Float = 0f
     private var socThermalMonitor: SocThermalMonitor? = null
 
+    // --- VARIABLES FOR CPU/GPU LOAD ---
+    private var cpuLoad = 0
+    private var gpuLoad = 0
+    private var hardwareLoadJob: Job? = null
+
     private fun getAppNameForPackage(pkg: String): String {
         return try {
             val appInfo = packageManager.getApplicationInfo(pkg, 0)
@@ -249,7 +254,7 @@ class FpsOverlayService : Service() {
                     batTemp,
                     batWatts,
                     cpuTemp = cpuTemp,
-                    gpuTemp = gpuTemp
+                    gpuTemp = gpuTemp, cpuLoad = cpuLoad, gpuLoad = gpuLoad
                 )
 
                 val recActive = FpsRecordingManager.isRecordingActive()
@@ -322,6 +327,7 @@ class FpsOverlayService : Service() {
         }
         updateRamMonitoring()
         updateSocThermalMonitoring()
+        startHardwareLoadMonitoring()
 
         FpsTileService.updateTile(this)
     }
@@ -682,12 +688,12 @@ class FpsOverlayService : Service() {
                 overlayView.alpha = 1.0f
                 val shadowAlpha = (255 * overlayAlpha.coerceIn(0.1f, 1.0f)).roundToInt()
                 overlayView.setShadowLayer(2f, 0f, 0f, Color.argb(shadowAlpha, 0, 0, 0))
-                
+
                 layoutParams.gravity = overlayGravity
                 layoutParams.x = posX
                 layoutParams.y = posY
                 windowManager.updateViewLayout(overlayView, layoutParams)
-                
+
                 updateOverlayText()
             }
         }
@@ -748,7 +754,7 @@ class FpsOverlayService : Service() {
         if (!::overlayView.isInitialized) return
         val fps = currentFps
         val fpsValueColor = if (textColor == OverlaySettings.AUTO_COLOR) {
-             when {
+            when {
                 fps >= 60 -> Color.GREEN
                 fps >= 45 -> Color.YELLOW
                 fps >= 30 -> Color.rgb(255, 165, 0)
@@ -788,8 +794,6 @@ class FpsOverlayService : Service() {
                 (if (hasSwap) 1 else 0)
 
         val hasThermals = hasCpu || hasGpu || hasSoc || hasBatt || hasBattLevel || hasBattPower
-        // Wrap thermals to next line if more than 3 extra overlays are enabled (> 3) OR if RAM overlay is also enabled and thermals are present
-        // If singleLineOverlay is enabled, keep all metrics on a single horizontal line.
         val useNextLine = !singleLineOverlay && ((extraOverlayCount > 3 && hasThermals) || (hasRam && hasThermals) || (hasSwap && hasThermals))
         val isMultiLine = !singleLineOverlay && (useNextLine || hasRam || hasSwap)
 
@@ -860,7 +864,7 @@ class FpsOverlayService : Service() {
                 ssb.append(socModel, colorSoc, StyleSpan(Typeface.BOLD))
             }
 
-            // 2. GPU row (only if GPU temp enabled)
+            // 2. GPU row
             if (hasGpu) {
                 newLine()
                 val gpuTempStr = if (gpuTemp > 0f) {
@@ -868,10 +872,12 @@ class FpsOverlayService : Service() {
                 } else {
                     if (singleLineOverlay) "--°C" else "-- °C"
                 }
-                appendRow("GPU", colorGpu, listOf(gpuTempStr to colorVal))
+                val gpuCells = mutableListOf(gpuTempStr to colorVal)
+                gpuCells.add((if (gpuLoad >= 0) "$gpuLoad%" else "N/A") to colorVal) // <--- UPDATED LOAD
+                appendRow("GPU", colorGpu, gpuCells)
             }
 
-            // 3. CPU row (only if CPU temp enabled)
+            // 3. CPU row
             if (hasCpu) {
                 newLine()
                 val cpuTempStr = if (cpuTemp > 0f) {
@@ -884,10 +890,11 @@ class FpsOverlayService : Service() {
                     val freqStr = if (singleLineOverlay) "${cpuFreq}MHz" else "$cpuFreq MHz"
                     cpuCells.add(freqStr to colorVal)
                 }
+                cpuCells.add("$cpuLoad%" to colorVal) // <--- ADDED LOAD
                 appendRow("CPU", colorCpu, cpuCells)
             }
 
-            // 4. SoC Temp row (only if SoC temp enabled)
+            // 4. SoC Temp row
             if (hasSoc) {
                 newLine()
                 val socTempStr = if (socTemp > 0f) {
@@ -898,7 +905,7 @@ class FpsOverlayService : Service() {
                 appendRow("SOC", colorSocTag, listOf(socTempStr to colorVal))
             }
 
-            // 5. BAT row (only if battery temp, level, or power enabled)
+            // 5. BAT row
             if (hasBatt || hasBattLevel || hasBattPower) {
                 newLine()
                 val batCells = mutableListOf<Pair<String, Int>>()
@@ -923,7 +930,7 @@ class FpsOverlayService : Service() {
                 appendRow("BAT", colorBat, batCells)
             }
 
-            // 6. RAM row (only if RAM overlay enabled)
+            // 6. RAM row
             if (hasRam) {
                 val availStr = if (lastRamSample.totalBytes > 0L) {
                     "${formatRamValue(lastRamSample.availBytes, ramUnit)} (${lastRamSample.availPercent}%)"
@@ -947,10 +954,7 @@ class FpsOverlayService : Service() {
                     }
                 } else {
                     if (showAvailableRam && showUsedRam) {
-                        // Line 1: appendRow handles exact alignment to standardHeaderWidth
                         appendRow("RAM", colorRam, listOf(availStr to colorVal))
-
-                        // Line 2: \n + SpaceSpan(standardHeaderWidth) + usedStr
                         ssb.append("\n")
                         val indentStart = ssb.length
                         ssb.append(" ")
@@ -964,7 +968,7 @@ class FpsOverlayService : Service() {
                 }
             }
 
-            // 7. SWP row (only if SWAP enabled)
+            // 7. SWP row
             if (hasSwap) {
                 val swapStr = if (lastSwapSample.totalBytes > 0L) {
                     "${formatRamValue(lastSwapSample.usedBytes, ramUnit)} (${lastSwapSample.usedPercent}%)"
@@ -975,7 +979,7 @@ class FpsOverlayService : Service() {
                 appendRow("SWP", colorSwap, listOf(swapStr to colorVal))
             }
 
-            // 8. FPS row (only shown if showFps)
+            // 8. FPS row
             if (showFps) {
                 newLine()
                 val fpsStr = "$fps FPS"
@@ -1025,22 +1029,19 @@ class FpsOverlayService : Service() {
         }
 
         if (showFps) {
-            // === Performance Group (FPS, Graphics API, Frame Time) ===
             ssb.append("FPS ", labelColor, StyleSpan(Typeface.BOLD))
             ssb.append("$fps", fpsValueColor, StyleSpan(Typeface.BOLD))
 
-            // Graphics API tag (when using SurfaceFlinger provider and option enabled)
             if (hasApi) {
                 val apiColor = if (detectedGraphicsApi == GraphicsApi.VULKAN) {
-                    Color.parseColor("#FF5722") // Distinct orange for Vulkan
+                    Color.parseColor("#FF5722")
                 } else {
-                    Color.parseColor("#2196F3") // Blue for OpenGL ES
+                    Color.parseColor("#2196F3")
                 }
                 ssb.append("  |  ", Color.GRAY)
                 ssb.append(detectedGraphicsApi.shortLabel, apiColor, StyleSpan(Typeface.BOLD))
             }
 
-            // MS segment
             if (hasMs) {
                 ssb.append("  |  ", Color.GRAY)
                 ssb.append("MS ", labelColor, StyleSpan(Typeface.BOLD))
@@ -1048,7 +1049,6 @@ class FpsOverlayService : Service() {
             }
         }
 
-        // === Hardware / Thermals Group (CPU, GPU, SoC, Battery) ===
         if (hasThermals) {
             if (showFps && useNextLine) {
                 ssb.append("\n")
@@ -1065,11 +1065,14 @@ class FpsOverlayService : Service() {
             }
 
             if (hasCpu) {
-                val cpuDisplay = if (cpuTemp > 0f) "${cpuTemp}°C" else "--°C"
+                // --- ADDED CPU LOAD HERE ---
+                val cpuDisplay = if (cpuTemp > 0f) "${cpuTemp}°C $cpuLoad%" else "--°C"
                 appendThermal("CPU", cpuDisplay)
             }
             if (hasGpu) {
-                val gpuDisplay = if (gpuTemp > 0f) "${gpuTemp}°C" else "--°C"
+                // --- UPDATED GPU LOAD HERE ---
+                val loadText = if (gpuLoad >= 0) "$gpuLoad%" else "N/A"
+                val gpuDisplay = if (gpuTemp > 0f) "${gpuTemp}°C $loadText" else "--°C"
                 appendThermal("GPU", gpuDisplay)
             }
             if (hasSoc) {
@@ -1097,7 +1100,6 @@ class FpsOverlayService : Service() {
             }
         }
 
-        // === Memory Group (RAM) ===
         if (hasRam) {
             if (ssb.isNotEmpty()) {
                 if (singleLineOverlay) {
@@ -1146,7 +1148,6 @@ class FpsOverlayService : Service() {
             }
         }
 
-        // === Swap Group (SWP) ===
         if (hasSwap) {
             if (ssb.isNotEmpty()) {
                 if (singleLineOverlay) {
@@ -1224,7 +1225,7 @@ class FpsOverlayService : Service() {
                 if (isOverlayVisible) {
                     updateOverlayText()
                 }
-                delay(1000L)
+                delay(200L)
             }
         }
     }
@@ -1259,7 +1260,6 @@ class FpsOverlayService : Service() {
             }
         }
 
-        // Default or fallback: Choreographer
         stopSurfaceFlingerMeasuring()
         startChoreographerMeasuring()
     }
@@ -1358,7 +1358,6 @@ class FpsOverlayService : Service() {
                         updateOverlayText()
                     }
 
-                    // In-memory FPS recording integration
                     val activePkg = fgPkg ?: FpsAccessibilityService.currentForegroundPackage
                     if (activePkg != null && activePkg != packageName) {
                         lastDetectedPackage = activePkg
@@ -1375,7 +1374,7 @@ class FpsOverlayService : Service() {
                         batTemp,
                         batWatts,
                         cpuTemp = cpuTemp,
-                        gpuTemp = gpuTemp
+                        gpuTemp = gpuTemp, cpuLoad = cpuLoad, gpuLoad = gpuLoad
                     )
 
                     val recActive = FpsRecordingManager.isRecordingActive()
@@ -1412,7 +1411,8 @@ class FpsOverlayService : Service() {
                     onSnapshotUpdate = { snapshot ->
                         socTemp = snapshot.soc ?: 0f
                         cpuTemp = snapshot.cpu ?: 0f
-                        gpuTemp = snapshot.gpu ?: 0f
+                        // We still take gpuTemp from here if available, but the hardware loop also updates it
+                        gpuTemp = snapshot.gpu ?: gpuTemp
                         if (isOverlayVisible) {
                             updateOverlayText()
                         }
@@ -1437,6 +1437,44 @@ class FpsOverlayService : Service() {
             gpuTemp = 0f
             if (isOverlayVisible) {
                 updateOverlayText()
+            }
+        }
+    }
+
+    // --- MONITORING FUNCTION FOR CPU/GPU LOAD ---
+    // Only does any work while a CPU/GPU row is visible or a session is recording.
+    private fun needHardwareLoad(): Boolean {
+        return (isOverlayVisible && (showCpuTemp || showGpuTemp)) ||
+                FpsRecordingManager.isRecordingActive()
+    }
+
+    private fun startHardwareLoadMonitoring() {
+        hardwareLoadJob?.cancel()
+        hardwareLoadJob = serviceScope.launch(Dispatchers.IO) {
+            var wasActive = false
+            while (isActive) {
+                if (!needHardwareLoad()) {
+                    wasActive = false
+                    delay(1000L)
+                    continue
+                }
+                if (!wasActive) {
+                    DeviceHardwareHelper.resetLoadBaselines()
+                    wasActive = true
+                }
+                val startedAt = android.os.SystemClock.elapsedRealtime()
+                val cLoad = DeviceHardwareHelper.getCpuLoad()
+                val gLoad = DeviceHardwareHelper.getGpuLoad()
+                withContext(Dispatchers.Main) {
+                    cpuLoad = cLoad
+                    gpuLoad = gLoad
+                    if (isOverlayVisible) {
+                        updateOverlayText()
+                    }
+                }
+                // Aim for one reading per second, however long the sampling took
+                val spent = android.os.SystemClock.elapsedRealtime() - startedAt
+                delay((1000L - spent).coerceAtLeast(100L))
             }
         }
     }
@@ -1530,7 +1568,7 @@ class FpsOverlayService : Service() {
                                 updateOverlayText()
                             }
                         }
-                        delay(2000L)
+                        delay(1000L)
                     }
                 }
             }
@@ -1623,7 +1661,6 @@ class FpsOverlayService : Service() {
                         isDragging = true
                     }
                     if (isDragging) {
-                        // Update internal position so manual drag is remembered
                         layoutParams.x = initX + dx
                         layoutParams.y = initY + dy
                         posX = layoutParams.x
@@ -1634,7 +1671,6 @@ class FpsOverlayService : Service() {
                 }
                 MotionEvent.ACTION_UP -> {
                     if (isDragging) {
-                        // Save the updated position to SharedPreferences
                         val saved = OverlaySettings.load(this@FpsOverlayService)
                         val updated = saved.copy(posX = posX, posY = posY)
                         OverlaySettings.save(this@FpsOverlayService, updated)
@@ -1669,6 +1705,11 @@ class FpsOverlayService : Service() {
         socThermalMonitor = null
         ramMonitorJob?.cancel()
         ramMonitorJob = null
+
+        // --- CLEANUP FOR LOAD MONITORING ---
+        hardwareLoadJob?.cancel()
+        hardwareLoadJob = null
+
         FpsRecordingManager.endCurrentSession(this)
         batteryMonitor?.stop()
         batteryMonitor = null
