@@ -70,7 +70,9 @@ data class OverlaySettings(
     val overlayStyle: OverlayStyle = OverlayStyle.DEFAULT,
     val showSocName: Boolean = true,
     val startOnBoot: Boolean = false,
-    val useRoot: Boolean = false
+    val useRoot: Boolean = false,
+    val heavyMetricsPerCore: Boolean = false, // <-- ADD THIS
+    val heavyMetricsGpuClock: Boolean = false  // <-- ADD THIS
 ) {
     companion object {
         const val AUTO_COLOR = 0 // Sentinel value for automatic coloring
@@ -112,7 +114,8 @@ data class OverlaySettings(
         private const val KEY_SHOW_SOC_NAME = "show_soc_name"
         private const val KEY_START_ON_BOOT = "start_on_boot"
         private const val KEY_USE_ROOT = "use_root"
-
+        private const val KEY_HEAVY_PERCORE = "heavy_percore" // <-- ADD THIS
+        private const val KEY_HEAVY_GPUCLOCK = "heavy_gpuclock" // <-- ADD THIS
         fun load(context: Context): OverlaySettings {
             val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
             val defaultSettings = OverlaySettings()
@@ -152,7 +155,9 @@ data class OverlaySettings(
                 overlayStyle = OverlayStyle.fromString(prefs.getString(KEY_OVERLAY_STYLE, defaultSettings.overlayStyle.name)),
                 showSocName = prefs.getBoolean(KEY_SHOW_SOC_NAME, defaultSettings.showSocName),
                 startOnBoot = prefs.getBoolean(KEY_START_ON_BOOT, defaultSettings.startOnBoot),
-                useRoot = prefs.getBoolean(KEY_USE_ROOT, defaultSettings.useRoot)
+                useRoot = prefs.getBoolean(KEY_USE_ROOT, defaultSettings.useRoot),
+                heavyMetricsPerCore = prefs.getBoolean(KEY_HEAVY_PERCORE, defaultSettings.heavyMetricsPerCore), // <-- ADD THIS
+                heavyMetricsGpuClock = prefs.getBoolean(KEY_HEAVY_GPUCLOCK, defaultSettings.heavyMetricsGpuClock) // <-- ADD THIS
             )
         }
 
@@ -195,10 +200,14 @@ data class OverlaySettings(
                 putBoolean(KEY_START_ON_BOOT, settings.startOnBoot)
                 putBoolean(KEY_USE_ROOT, settings.useRoot)
                 apply()
+                putBoolean(KEY_HEAVY_PERCORE, settings.heavyMetricsPerCore) // <-- ADD THIS
+                putBoolean(KEY_HEAVY_GPUCLOCK, settings.heavyMetricsGpuClock) // <-- ADD THIS
+                apply()
+            }
             }
         }
     }
-}
+
 
 class FpsViewModel(
     private val packageManager: PackageManager,

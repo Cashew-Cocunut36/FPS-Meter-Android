@@ -180,6 +180,11 @@ class FpsOverlayService : Service() {
     private var showSocName = true
     private var useRoot = false
 
+    private var heavyMetricsPerCore = false // <-- ADD
+    private var heavyMetricsGpuClock = false // <-- ADD
+    private var perCoreLoads = IntArray(8) { 0 } // <-- ADD
+    private var gpuClockMhz = 0 // <-- ADD
+
     data class RamSample(
         val availBytes: Long = 0L,
         val usedBytes: Long = 0L,
@@ -313,6 +318,8 @@ class FpsOverlayService : Service() {
         overlayStyle = saved.overlayStyle
         showSocName = saved.showSocName
         useRoot = saved.useRoot
+        heavyMetricsPerCore = saved.heavyMetricsPerCore // <-- ADD
+        heavyMetricsGpuClock = saved.heavyMetricsGpuClock // <-- ADD
         if (useRoot && !com.rdevzph.fpsmeter.util.ShellHelper.isRootGranted.value) {
             serviceScope.launch(Dispatchers.IO) {
                 com.rdevzph.fpsmeter.util.ShellHelper.checkOrRequestRootAccess(requestPrompt = false)
@@ -1462,9 +1469,18 @@ class FpsOverlayService : Service() {
                     DeviceHardwareHelper.resetLoadBaselines()
                     wasActive = true
                 }
-                val startedAt = android.os.SystemClock.elapsedRealtime()
+
                 val cLoad = DeviceHardwareHelper.getCpuLoad()
                 val gLoad = DeviceHardwareHelper.getGpuLoad()
+
+                // --- ONLY DO HEAVY WORK IF TOGGLED ON ---
+                if (heavyMetricsPerCore) {
+                    perCoreLoads = DeviceHardwareHelper.getPerCoreCpuLoad()
+                }
+                if (heavyMetricsGpuClock) {
+                    gpuClockMhz = DeviceHardwareHelper.getGpuClockMhz()
+                }
+
                 withContext(Dispatchers.Main) {
                     cpuLoad = cLoad
                     gpuLoad = gLoad
@@ -1472,9 +1488,7 @@ class FpsOverlayService : Service() {
                         updateOverlayText()
                     }
                 }
-                // Aim for one reading per second, however long the sampling took
-                val spent = android.os.SystemClock.elapsedRealtime() - startedAt
-                delay((1000L - spent).coerceAtLeast(100L))
+                delay(1000L)
             }
         }
     }

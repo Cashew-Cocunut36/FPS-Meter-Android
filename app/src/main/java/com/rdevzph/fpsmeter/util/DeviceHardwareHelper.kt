@@ -130,6 +130,64 @@ object DeviceHardwareHelper {
         }
     }
 
+    // Remembered for per-core readings
+    private val prevCoreTotal = LongArray(8) { 0L }
+    private val prevCoreIdle = LongArray(8) { 0L }
+    private val lastCoreLoads = IntArray(8) { 0 }
+
+    /**
+     * Reads all core loads in one shell command. Only called when Heavy Metrics is ON.
+     */
+    fun getPerCoreCpuLoad(): IntArray {
+        try {
+            val output = ShellHelper.runShellCommand("cat /proc/stat")
+            val lines = output.lines()
+
+            for (line in lines) {
+                if (!line.startsWith("cpu") || line.startsWith("cpu ")) continue
+
+                // Parse cpu0, cpu1, etc.
+                val parts = line.split(Regex("\\s+")).filter { it.isNotEmpty() }
+                if (parts.size < 8) continue
+
+                val coreIndex = parts[0].removePrefix("cpu").toIntOrNull() ?: continue
+                if (coreIndex !in 0..7) continue
+
+                val values = parts.drop(1).mapNotNull { it.toLongOrNull() }
+                if (values.size < 7) continue
+
+                val idle = values[3] + values[4] // idle + iowait
+                val total = values.take(8).sum()
+
+                val deltaTotal = total - prevCoreTotal[coreIndex]
+                val deltaIdle = idle - prevCoreIdle[coreIndex]
+
+                if (prevCoreTotal[coreIndex] > 0L && deltaTotal > 0L) {
+                    lastCoreLoads[coreIndex] = (((deltaTotal - deltaIdle) * 100L) / deltaTotal).toInt().coerceIn(0, 100)
+                }
+
+                prevCoreTotal[coreIndex] = total
+                prevCoreIdle[coreIndex] = idle
+            }
+            return lastCoreLoads
+        } catch (_: Exception) {
+            return lastCoreLoads
+        }
+    }
+
+    /**
+     * Reads the GPU clock (Only on Samsung/MediaTek with the specific sysfs)
+     */
+    fun getGpuClockMhz(): Int {
+        return try {
+            val output = ShellHelper.runShellCommand("cat /sys/kernel/gpu/gpu_clock 2>/dev/null").trim()
+            val hz = output.toIntOrNull() ?: 0
+            hz / 1000000 // Convert Hz to MHz
+        } catch (_: Exception) {
+            0
+        }
+    }
+
     /**
      * GPU load (0-100), or -1 when this phone has no readable source (show N/A).
      * Sources:

@@ -2065,6 +2065,49 @@ fun OverlaySettingsPanel(
             }
         }
 
+        Spacer(Modifier.height(12.dp))
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
+        Spacer(Modifier.height(12.dp))
+
+        Text(
+            "Heavy Metrics (Report Sheet)",
+            style = MaterialTheme.typography.labelMedium,
+            fontWeight = FontWeight.Bold,
+            color = MaterialTheme.colorScheme.primary
+        )
+        Text(
+            "Recorded to session data only. Zero background cost when off.",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+
+        Spacer(Modifier.height(8.dp))
+
+        // Per-core CPU toggle
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text("Per-Core CPU Logging", style = MaterialTheme.typography.labelMedium)
+                Text("Records all 8 cores to find bottlenecks", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            Switch(
+                checked = settings.heavyMetricsPerCore,
+                onCheckedChange = { onChange(settings.copy(heavyMetricsPerCore = it)) },
+                modifier = Modifier.scale(0.8f)
+            )
+        }
+
+        // GPU Clock toggle
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text("GPU Clock Speed Logging", style = MaterialTheme.typography.labelMedium)
+                Text("Detects thermal throttling", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            Switch(
+                checked = settings.heavyMetricsGpuClock,
+                onCheckedChange = { onChange(settings.copy(heavyMetricsGpuClock = it)) },
+                modifier = Modifier.scale(0.8f)
+            )
+        }
         Spacer(Modifier.height(10.dp))
 
         // Single-line overlay toggle
